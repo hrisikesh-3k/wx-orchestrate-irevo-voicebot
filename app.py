@@ -1,215 +1,406 @@
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from fastapi import Request
-import speech_recognition as sr
-import pyttsx3
-import asyncio
-from src.agents import RealEstateAgent
-import threading
-import queue
+from pydantic import BaseModel, Field
+from typing import Optional, Dict, Any
+import json
 import logging
-import time
-from src.utils import remove_md_asterisks
+import asyncio
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
+import os
+from dotenv import load_dotenv
+
+from src.constants import WELCOME_MESSAGE
+from src.agents import VoiceEscalationAgent
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-# Initialize FastAPI app
-app = FastAPI()
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+# Load environment variables
+load_dotenv()
 
-# Initialize components
-agent_builder = RealEstateAgent()
-agent = agent_builder.build_agent()
-recognizer = sr.Recognizer()
+# Pydantic models for request/response validation
+class ChatRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=1000, description="User's message")
+    session_id: Optional[str] = Field(None, description="Session identifier")
 
-# Initialize TTS engine
-engine = pyttsx3.init()
+class ChatResponse(BaseModel):
+    message: str
+    show_escalation_buttons: bool = False
+    escalation_reason: Optional[str] = None
+    session_id: Optional[str] = None
 
-# Create locks and events for synchronization
-tts_lock = threading.Lock()
-mic_lock = threading.Lock()
-is_speaking = threading.Event() #playing the output as audio
-should_stop = threading.Event()
+class EscalationRequest(BaseModel):
+    action: str = Field(..., description="Escalation action: 'talk_now' or 'schedule_callback'")
+    session_id: str = Field(..., description="Session identifier")
 
-# Queues for thread synchronization
-audio_queue = queue.Queue()
+class WebSocketMessage(BaseModel):
+    message: str = Field(..., min_length=1, max_length=1000)
+    session_id: Optional[str] = Field(None)
+    message_type: str = Field(default="chat")
 
+class ResetConversationRequest(BaseModel):
+    session_id: str = Field(..., description="Session identifier")
 
-class MicrophoneManager:
-    def __init__(self):
-        self.mic = None
-        self.source = None
+class CallbackScheduleRequest(BaseModel):
+    session_id: str = Field(..., description="Session identifier")
+    phone_number: str = Field(..., description="Phone number for callback")
+    preferred_time: str = Field(..., description="Preferred callback time")
+    timezone: Optional[str] = Field(None, description="User's timezone")
 
-    def __enter__(self):
-        if is_speaking.is_set():
-            return None
-        self.mic = sr.Microphone()
-        self.source = self.mic.__enter__()
-        return self.source
+# Global variables
+agent: Optional[VoiceEscalationAgent] = None
+executor = ThreadPoolExecutor(max_workers=10)
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.mic:
-            self.mic.__exit__(exc_type, exc_val, exc_tb)
-
-
-def listen():
-    """Capture audio from the microphone and transcribe it."""
-    if is_speaking.is_set():
-        return None
-
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifespan - startup and shutdown events."""
+    global agent
+    
+    logger.info("Starting up Banking Support API...")
+    
+    # Initialize single agent instance
     try:
-        with mic_lock:  # Ensure exclusive mic access
-            with MicrophoneManager() as source:
-                if source is None or is_speaking.is_set():
-                    return None
-
-                logging.info("Listening for audio...")
-                # recognizer.adjust_for_ambient_noise(source) 
-                # recognizer.dynamic_energy_threshold
-                audio = recognizer.listen(source)
-
-                # Double check we're not speaking before processing
-                if is_speaking.is_set():
-                    return None
-
-                return recognizer.recognize_google(audio, language="en-IN")
-    except sr.WaitTimeoutError:
-        return None
-    except sr.UnknownValueError:
-        return None
-    except sr.RequestError as e:
-        logging.error(f"Speech recognition error: {e}")
-        return None
+        agent = VoiceEscalationAgent()
+        logger.info("VoiceEscalationAgent initialized successfully")
     except Exception as e:
-        logging.error(f"Unexpected error in listen: {e}")
-        return None
+        logger.error(f"Failed to initialize VoiceEscalationAgent: {e}")
+        raise
+    
+    yield
+    
+    # Cleanup
+    logger.info("Shutting down Banking Support API...")
+    executor.shutdown(wait=True)
 
+app = FastAPI(
+    title="Banking Support API",
+    description="AI-powered banking support with voice escalation capabilities",
+    version="1.0.0",
+    lifespan=lifespan
+)
 
-def speak_text(text):
-    """Convert text to speech using TTS engine."""
+# CORS configuration - be more restrictive in production
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["*"],
+)
+
+# Serve static files
+static_dir = os.path.abspath("frontend/public")
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+else:
+    logger.warning(f"Static directory not found: {static_dir}")
+
+def get_or_create_session_id(provided_session_id: Optional[str] = None) -> str:
+    """Get existing session ID or create a new one."""
+    if provided_session_id:
+        return provided_session_id
+    return str(uuid.uuid4())
+
+async def run_agent_chat(user_input: str, session_id: str) -> Dict[str, Any]:
+    """Run agent chat synchronously in thread pool."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, agent.chat, user_input, session_id)
+
+async def run_agent_chat_stream(user_input: str, session_id: str) -> Dict[str, Any]:
+    """Run agent chat stream synchronously in thread pool."""
+    loop = asyncio.get_event_loop()
+    # Convert generator to single response for now
+    result = await loop.run_in_executor(executor, agent.chat, user_input, session_id)
+    return result
+
+@app.get("/", response_class=FileResponse)
+async def root():
+    """Serve the main chat interface."""
+    html_path = os.path.abspath("frontend/public/simple-chat.html")
+    if os.path.exists(html_path):
+        return FileResponse(html_path)
+    else:
+        logger.error(f"HTML file not found: {html_path}")
+        raise HTTPException(status_code=404, detail="Chat interface not found")
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {
+        "status": "healthy",
+        "agent_initialized": agent is not None,
+        "version": "1.0.0"
+    }
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat_endpoint(request: ChatRequest) -> ChatResponse:
+    """REST endpoint for chat interactions."""
     try:
-        is_speaking.set()  # Signal that speech is starting
-        time.sleep(0.1)  # Small delay to ensure mic is fully stopped
-
-        with tts_lock:
-            text = remove_md_asterisks(text) # Remove markdown asterisks
-            engine.say(text)
-            engine.runAndWait()
-
+        # Get or create session ID
+        session_id = get_or_create_session_id(request.session_id)
+        
+        logger.info(f"Chat request for session {session_id}: {request.query[:50]}...")
+        
+        if not agent:
+            logger.error("Agent not initialized")
+            raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+        
+        # Run agent with session ID
+        response = await run_agent_chat(request.query, session_id)
+        
+        logger.info(f"Agent response for session {session_id}: {response}")
+        
+        return ChatResponse(
+            message=response.get("message", "I'm here to help!"),
+            show_escalation_buttons=response.get("show_escalation_buttons", False),
+            escalation_reason=response.get("escalation_reason"),
+            session_id=session_id
+        )
+        
     except Exception as e:
-        logging.error(f"TTS Error: {e}")
-    finally:
-        time.sleep(0.2)  # Small delay before allowing mic to start again
-        is_speaking.clear()
+        logger.error(f"Error in chat endpoint: {e}")
+        session_id = get_or_create_session_id(request.session_id)
+        return ChatResponse(
+            message="I'm experiencing technical difficulties. Let me connect you with a human support agent.",
+            show_escalation_buttons=True,
+            escalation_reason="system_error",
+            session_id=session_id
+        )
 
 
-async def process_audio(websocket: WebSocket):
-    """Process audio queries from the queue."""
-    while not should_stop.is_set():
-        try:
-            query = audio_queue.get_nowait()
-
-            if not query:  # Skip if no valid input
-                continue
-
-            if query.lower() in ["exit", "bye", "stop"]:
-                await websocket.send_json({"role": "user", "content": query, "status": "Stopping..."})
-                should_stop.set()
-                break
-
-            await websocket.send_json({"role": "user", "content": query, "status": "Processing..."})
-
-            output = agent.invoke({"input": query})
-            response = output['output']
-
-            # First send the response to UI
-            await websocket.send_json({"role": "assistant", "content": response, "status": "Received..."})
-
-            # Small delay to ensure UI updates before audio starts
-            await asyncio.sleep(0.2)
-
-            # Then play the audio
-            await websocket.send_json({"status": "Speaking..."})
-            speak_text(response)
-
-        except queue.Empty:
-            await asyncio.sleep(0.1)
-        except Exception as e:
-            logging.error(f"Error in process_audio: {e}")
-            is_speaking.clear()
 
 
-def audio_listener():
-    """Listen for audio input and add it to the queue."""
-    while not should_stop.is_set():
-        try:
-            if is_speaking.is_set():
-                time.sleep(0.1)  # Short sleep to prevent busy waiting
-                continue
-
-            query = listen()
-            if query:  # Only process valid input
-                audio_queue.put(query)
-                logging.info(f"Received audio input: {query}")
-
-                if query.lower() in ["exit", "bye", "stop"]:
-                    should_stop.set()
-                    break
-
-        except Exception as e:
-            logging.error(f"Error in audio_listener: {e}")
-            break
-
-
-@app.get("/")
-async def get(request: Request):
-    """Serve the main page."""
-    return templates.TemplateResponse("index.html", {"request": request})
-
-
-@app.websocket("/ws")
+@app.websocket("/ws/chat")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for handling audio input and responses."""
+    """WebSocket endpoint for real-time chat."""
     await websocket.accept()
-    audio_thread = None
-
+    
+    # Generate session ID
+    session_id = str(uuid.uuid4())
+    logger.info(f"WebSocket connection established: {session_id}")
+    
     try:
+        # Send welcome message
+        await websocket.send_json({
+            "message": WELCOME_MESSAGE,
+            "role": "bot",
+            "session_id": session_id
+        })
+        
         while True:
-            data = await websocket.receive_json()
-
-            if data['action'] == 'start' and audio_thread is None:
-                # Reset all control flags
-                should_stop.clear()
-                is_speaking.clear()
-
-                audio_thread = threading.Thread(target=audio_listener)
-                audio_thread.daemon = True 
-                audio_thread.start()
-
-                await websocket.send_json({"status": "Listening..."})
-                await process_audio(websocket)
-
-            elif data['action'] == 'stop' and audio_thread is not None:
-                should_stop.set()
-                is_speaking.clear()
-                audio_queue.put("stop")
-                audio_thread = None
-
-                await websocket.send_json({"status": "Stopped"})
-
+            try:
+                # Receive message
+                data = await asyncio.wait_for(websocket.receive_json(), timeout=300)  # 5 min timeout
+                
+                # Validate message
+                try:
+                    ws_message = WebSocketMessage(**data)
+                except Exception as e:
+                    await websocket.send_json({
+                        "error": "Invalid message format",
+                        "role": "system"
+                    })
+                    continue
+                
+                user_input = ws_message.message
+                # Use provided session_id or the WebSocket session_id
+                current_session_id = ws_message.session_id or session_id
+                
+                logger.info(f"WebSocket message for session {current_session_id}: {user_input[:50]}...")
+                
+                # Check agent availability
+                if not agent:
+                    await websocket.send_json({
+                        "error": "Service temporarily unavailable",
+                        "role": "system"
+                    })
+                    continue
+                
+                # Process message with session ID
+                response = await run_agent_chat(user_input, current_session_id)
+                
+                # Send response
+                await websocket.send_json({
+                    "message": response.get("message", "I'm here to help!"),
+                    "role": "bot",
+                    "show_escalation_buttons": response.get("show_escalation_buttons", False),
+                    "escalation_reason": response.get("escalation_reason"),
+                    "session_id": current_session_id
+                })
+                
+            except asyncio.TimeoutError:
+                logger.info(f"WebSocket timeout for session: {session_id}")
+                await websocket.send_json({
+                    "message": "Session timeout. Please refresh if you need continued assistance.",
+                    "role": "system"
+                })
+                break
+                
+            except json.JSONDecodeError:
+                await websocket.send_json({
+                    "error": "Invalid JSON format",
+                    "role": "system"
+                })
+                
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected: {session_id}")
     except Exception as e:
-        logging.error(f"Error in websocket_endpoint: {e}")
+        logger.error(f"WebSocket error for session {session_id}: {e}")
+        try:
+            await websocket.send_json({
+                "error": "Internal server error",
+                "role": "system"
+            })
+        except:
+            pass
     finally:
-        should_stop.set()
-        is_speaking.clear()
-        if audio_thread is not None:
-            audio_queue.put("stop")
+        # Cleanup session
+        if agent:
+            try:
+                agent.cleanup_session(session_id)
+            except Exception as e:
+                logger.error(f"Error cleaning up session {session_id}: {e}")
 
+@app.get("/sessions/{session_id}/history")
+async def get_session_history(session_id: str):
+    """Get conversation history for a session."""
+    try:
+        if not agent:
+            raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+        
+        history = agent.get_conversation_history(session_id)
+        return {
+            "session_id": session_id,
+            "history": [
+                {
+                    "role": "human" if msg.type == "human" else "bot",
+                    "content": msg.content,
+                    "timestamp": getattr(msg, 'timestamp', None)
+                }
+                for msg in history
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error getting session history: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve history")
+
+@app.get("/sessions/{session_id}/status")
+async def get_session_status(session_id: str):
+    """Get session status including escalation state."""
+    try:
+        if not agent:
+            raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+        
+        is_escalated = agent.is_escalated(session_id)
+        history_count = len(agent.get_conversation_history(session_id))
+        
+        return {
+            "session_id": session_id,
+            "is_escalated": is_escalated,
+            "message_count": history_count,
+            "status": "escalated" if is_escalated else "active"
+        }
+    except Exception as e:
+        logger.error(f"Error getting session status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve session status")
+
+@app.post("/sessions/{session_id}/cleanup")
+async def cleanup_session(session_id: str):
+    """Clean up resources for a specific session."""
+    try:
+        if not agent:
+            raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+        
+        # Clean up session resources
+        agent.cleanup_session(session_id)
+        logger.info(f"Session cleaned up: {session_id}")
+        
+        return {
+            "message": "Session cleaned up successfully",
+            "session_id": session_id
+        }
+        
+    except Exception as e:
+        logger.error(f"Error cleaning up session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to cleanup session")
+
+@app.get("/sessions/active")
+async def get_active_sessions():
+    """Get list of active sessions."""
+    try:
+        if not agent:
+            raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+        
+        active_sessions = agent.get_active_sessions()
+        return {
+            "active_sessions": active_sessions,
+            "count": len(active_sessions)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting active sessions: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve active sessions")
+
+# Error handlers
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Handle HTTP exceptions."""
+    logger.error(f"HTTP error {exc.status_code}: {exc.detail}")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": exc.detail, "status_code": exc.status_code}
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Handle general exceptions."""
+    logger.error(f"Unhandled exception: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={"error": "Internal server error", "status_code": 500}
+    )
+
+# Additional utility endpoints
+@app.get("/metrics")
+async def get_metrics():
+    """Get system metrics."""
+    try:
+        if not agent:
+            raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+        
+        metrics = {
+            "active_sessions": len(agent.get_active_sessions()) if hasattr(agent, 'get_active_sessions') else 0,
+            "escalated_sessions": len([s for s in agent.get_active_sessions() if agent.is_escalated(s)]) if hasattr(agent, 'get_active_sessions') else 0,
+            "executor_queue_size": executor._work_queue.qsize() if hasattr(executor, '_work_queue') else 0,
+            "agent_initialized": agent is not None,
+        }
+        
+        return metrics
+        
+    except Exception as e:
+        logger.error(f"Error getting metrics: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve metrics")
 
 if __name__ == "__main__":
     import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    
+    # Configuration
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", 8000))
+    
+    uvicorn.run(
+        "app:app",
+        host=host,
+        port=port,
+        reload=os.getenv("DEBUG", "false").lower() == "true",
+        log_level="info"
+    )
