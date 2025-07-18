@@ -1,53 +1,22 @@
-## tools
-import os, sys
-from typing import Optional
 from langchain_core.tools import tool
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email import encoders
-from fpdf import FPDF
-from src.constants import *
-import re
-import logging
-from pydantic import BaseModel, Field
-from langchain_core.tools.structured import StructuredTool
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from src.constants.llm import watsonx_llm
+from src.tools.escalation_tool import escalate_to_voice_tool
+from src.tools.watsonx_tool import search_faq_tool
 
 
 
 @tool
-def escalate_to_voice(reason: str) -> Dict[str, Any]:
+def default_chat_tool(query: str) -> dict:
     """
-    Escalate the issue to a human voice support agent. 
-    Use this tool when:
-    - User explicitly requests to speak with a human/agent/person
-    - User expresses frustration or dissatisfaction
-    - User needs help with complex issues beyond FAQ scope
-    
-    Args:
-        reason: The reason for escalation
-        
-    Returns:
-        Dict containing escalation message and flag
+    Respond to casual or social queries that do not require FAQ search or escalation,
+    using the LLM to generate a natural response.
     """
-    try:
-        logger.info(f"Escalation triggered. Reason: {reason}")
-        return {
-            "message": (
-                "I'm connecting you to a human support agent who can better assist you. "
-                "You can talk to them now or schedule a callback using the options below."
-            ),
-            "show_escalation_buttons": True,
-            "escalation_reason": reason
-        }
-    except Exception as e:
-        logger.error(f"Error in escalate_to_voice: {e}")
-        return {
-            "message": "I'm connecting you to a human support agent.",
-            "show_escalation_buttons": True,
-            "escalation_reason": "system_error"
-        }
+    # Use the LLM to generate a conversational response
+    response = watsonx_llm.invoke(query)
+    # If the response is an AIMessage, extract content
+    message = getattr(response, "content", str(response))
+    return {
+        "message": message,
+        "show_escalation_buttons": False
+    }

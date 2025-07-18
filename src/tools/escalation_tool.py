@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 @tool
-def escalate_to_voice(reason: str) -> Dict[str, Any]:
+def escalate_to_voice_tool(reason: str) -> Dict[str, Any]:
     """
     Escalate the issue to a human voice support agent. 
     Use this tool when:

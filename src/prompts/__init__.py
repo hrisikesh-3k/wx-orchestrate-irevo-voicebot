@@ -1,5 +1,5 @@
 from datetime import datetime
-
+from src.constants import INSURANCE_COMPANY_NAME, AGENT_NAME
 # Get the current date
 current_date = datetime.now().date()
 

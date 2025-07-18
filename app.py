@@ -133,15 +133,10 @@ async def run_agent_chat_stream(user_input: str, session_id: str) -> Dict[str, A
     result = await loop.run_in_executor(executor, agent.chat, user_input, session_id)
     return result
 
-@app.get("/", response_class=FileResponse)
-async def root():
+@app.get("/")
+async def root(request: Request):
     """Serve the main chat interface."""
-    html_path = os.path.abspath("frontend/public/simple-chat.html")
-    if os.path.exists(html_path):
-        return FileResponse(html_path)
-    else:
-        logger.error(f"HTML file not found: {html_path}")
-        raise HTTPException(status_code=404, detail="Chat interface not found")
+    return templates.TemplateResponse("index.html", {"request": request})
 
 @app.get("/health")
 async def health_check():
@@ -405,13 +400,13 @@ if __name__ == "__main__":
     import uvicorn
     
     # Configuration
-    host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", 8000))
+    # host = os.getenv("HOST", "0.0.0.0")
+    # port = int(os.getenv("PORT", 8000))
     
     uvicorn.run(
         "app:app",
-        host=host,
-        port=port,
+        host="0.0.0.0",
+        port=8000,
         reload=os.getenv("DEBUG", "false").lower() == "true",
         log_level="info"
     )

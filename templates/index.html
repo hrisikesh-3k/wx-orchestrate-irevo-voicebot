@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Bank Support Chat</title>
+  <style>
+    * {
+      margin: 0; padding: 0; box-sizing: border-box;
+    }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .chat-container {
+      max-width: 800px;
+      margin: 20px auto;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 40px);
+      overflow: hidden;
+    }
+    .chat-header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 20px;
+      text-align: center;
+      font-size: 18px;
+      font-weight: 600;
+    }
+    #chat {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+      background: #f8f9fa;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+    .message {
+      display: flex;
+      margin-bottom: 15px;
+      animation: fadeIn 0.3s ease-in;
+    }
+    .message.user { justify-content: flex-end; }
+    .message.bot { justify-content: flex-start; }
+
+    .message-bubble {
+      max-width: 70%;
+      padding: 12px 16px;
+      border-radius: 18px;
+      word-wrap: break-word;
+      line-height: 1.4;
+    }
+    .message.user .message-bubble {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+    .message.bot .message-bubble {
+      background: white;
+      color: #333;
+      border: 1px solid #e0e0e0;
+      border-bottom-left-radius: 4px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    .message-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      margin: 0 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    .message.user .message-avatar {
+      background: #4CAF50;
+      color: white;
+      order: 2;
+    }
+    .message.bot .message-avatar {
+      background: #2196F3;
+      color: white;
+      order: 1;
+    }
+
+    .input-container {
+      background: white;
+      padding: 20px;
+      border-top: 1px solid #e0e0e0;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    #input {
+      flex: 1;
+      padding: 12px 16px;
+      border: 2px solid #e0e0e0;
+      border-radius: 25px;
+      font-size: 14px;
+      outline: none;
+    }
+    #input:focus { border-color: #667eea; }
+
+    #send {
+      padding: 12px 24px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 25px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    #send:disabled { opacity: 0.6; cursor: not-allowed; }
+    #send:hover:not(:disabled) { opacity: 0.9; }
+
+    .typing-indicator {
+      display: none;
+      align-items: center;
+      gap: 5px;
+      padding: 12px 16px;
+      border: 1px solid #e0e0e0;
+      border-radius: 18px;
+      background: white;
+      max-width: 70px;
+    }
+    .typing-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #999;
+      animation: typing 1.4s infinite;
+    }
+    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+    /* Escalation buttons styling */
+    .escalation-buttons {
+      display: flex;
+      gap: 12px;
+      margin-top: 15px;
+      flex-wrap: wrap;
+      animation: slideIn 0.3s ease-out;
+    }
+    
+    .escalation-btn {
+      padding: 12px 20px;
+      border: none;
+      border-radius: 25px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      min-width: 140px;
+      text-align: center;
+    }
+    
+    .escalation-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+    
+    .escalation-btn.talk-now {
+      background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+      color: white;
+    }
+    
+    .escalation-btn.schedule {
+      background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+      color: white;
+    }
+    
+    .escalation-btn.disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+
+    /* Status indicator */
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      background: #e3f2fd;
+      border-radius: 20px;
+      font-size: 12px;
+      color: #1976d2;
+      margin-top: 10px;
+      animation: pulse 2s infinite;
+    }
+    
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #4caf50;
+      animation: blink 1s infinite;
+    }
+
+    @keyframes typing {
+      0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+      30% { transform: translateY(-10px); opacity: 1; }
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+    
+    @keyframes blink {
+      0%, 50% { opacity: 1; }
+      51%, 100% { opacity: 0.3; }
+    }
+
+    @media (max-width: 768px) {
+      .chat-container {
+        margin: 10px;
+        height: calc(100vh - 20px);
+        border-radius: 8px;
+      }
+      .message-bubble { max-width: 85%; }
+      .escalation-buttons { flex-direction: column; }
+      .escalation-btn { min-width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="chat-container">
+    <div class="chat-header">Banking Support Chat</div>
+    <div id="chat">
+      <!-- <div class="message bot">
+        <div class="message-avatar">🤖</div>
+        <div class="message-bubble">Hi! I'm here to help you with your banking needs. How can I assist you today?</div>
+      </div> -->
+    </div>
+
+    <div class="input-container">
+      <input id="input" type="text" placeholder="Type your message..." autocomplete="off" />
+      <button id="send">Send</button>
+    </div>
+  </div>
+
+  <script>
+    const chat = document.getElementById('chat');
+    const input = document.getElementById('input');
+    const send = document.getElementById('send');
+    
+    let sessionId = null;
+    let ws = null;
+
+    function connectWebSocket() {
+      const wsUrl = window.location.protocol === 'https:'
+        ? `wss://${window.location.host}/ws/chat`
+        : `ws://${window.location.host}/ws/chat`;
+      
+      ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        console.log("WebSocket connected");
+        send.disabled = false;
+        showSystemMessage("Connected to support chat", "success");
+      };
+
+      ws.onmessage = (event) => {
+        handleWebSocketMessage(event);
+      };
+
+      ws.onclose = () => {
+        console.log("WebSocket disconnected");
+        showSystemMessage("Connection lost. Attempting to reconnect...", "error");
+        send.disabled = true;
+        setTimeout(connectWebSocket, 3000);
+      };
+
+      ws.onerror = (err) => {
+        console.error('WebSocket error:', err);
+        showSystemMessage("Connection error. Please refresh if issues persist.", "error");
+        send.disabled = true;
+      };
+    }
+
+    function handleWebSocketMessage(event) {
+      hideTypingIndicator();
+      let data = {};
+      try {
+        data = JSON.parse(event.data);
+      } catch {
+        data = { message: event.data, role: 'bot' };
+      }
+
+      if (data.session_id) {
+        sessionId = data.session_id;
+      }
+
+      if (data.role === 'system') {
+        showSystemMessage(data.message, data.error ? "error" : "info");
+        return;
+      }
+
+      setTimeout(() => {
+        addMessage(data.message, data.role || 'bot');
+        if (data.show_escalation_buttons) {
+          showEscalationButtons();
+        }
+      }, 300);
+    }
+
+    function addMessage(text, role) {
+      const msgDiv = document.createElement('div');
+      msgDiv.className = `message ${role}`;
+
+      const avatar = document.createElement('div');
+      avatar.className = 'message-avatar';
+      avatar.textContent = role === 'user' ? '👤' : '🤖';
+
+      const bubble = document.createElement('div');
+      bubble.className = 'message-bubble';
+      bubble.textContent = text;
+
+      msgDiv.appendChild(avatar);
+      msgDiv.appendChild(bubble);
+      chat.appendChild(msgDiv);
+      scrollToBottom();
+    }
+
+    function showSystemMessage(text, type = "info") {
+      const msgDiv = document.createElement('div');
+      msgDiv.className = 'message bot';
+      msgDiv.style.opacity = '0.8';
+
+      const avatar = document.createElement('div');
+      avatar.className = 'message-avatar';
+      avatar.textContent = type === 'error' ? '⚠️' : type === 'success' ? '✅' : 'ℹ️';
+
+      const bubble = document.createElement('div');
+      bubble.className = 'message-bubble';
+      bubble.style.background = type === 'error' ? '#ffebee' : type === 'success' ? '#e8f5e8' : '#e3f2fd';
+      bubble.style.borderColor = type === 'error' ? '#f44336' : type === 'success' ? '#4caf50' : '#2196f3';
+      bubble.textContent = text;
+
+      msgDiv.appendChild(avatar);
+      msgDiv.appendChild(bubble);
+      chat.appendChild(msgDiv);
+      scrollToBottom();
+    }
+
+    function showTypingIndicator() {
+      if (document.getElementById('typing-indicator')) return;
+      
+      const typing = document.createElement('div');
+      typing.className = 'message bot';
+      typing.id = 'typing-indicator';
+
+      const avatar = document.createElement('div');
+      avatar.className = 'message-avatar';
+      avatar.textContent = '🤖';
+
+      const bubble = document.createElement('div');
+      bubble.className = 'typing-indicator';
+      bubble.style.display = 'flex';
+
+      for (let i = 0; i < 3; i++) {
+        const dot = document.createElement('div');
+        dot.className = 'typing-dot';
+        bubble.appendChild(dot);
+      }
+
+      typing.appendChild(avatar);
+      typing.appendChild(bubble);
+      chat.appendChild(typing);
+      scrollToBottom();
+    }
+
+    function hideTypingIndicator() {
+      const typing = document.getElementById('typing-indicator');
+      if (typing) typing.remove();
+    }
+
+    function showEscalationButtons() {
+      const existing = document.getElementById('escalation-buttons');
+      if (existing) existing.remove();
+
+      const container = document.createElement('div');
+      container.id = 'escalation-buttons';
+      container.className = 'escalation-buttons';
+
+      const talkBtn = document.createElement('button');
+      talkBtn.className = 'escalation-btn talk-now';
+      talkBtn.innerHTML = '📞 Talk to Agent Now';
+      talkBtn.onclick = () => {
+        if (window.handleTalkNow) window.handleTalkNow(sessionId);
+      };
+
+      const scheduleBtn = document.createElement('button');
+      scheduleBtn.className = 'escalation-btn schedule';
+      scheduleBtn.innerHTML = '📅 Schedule Callback';
+      scheduleBtn.onclick = () => {
+        if (window.handleScheduleCallback) window.handleScheduleCallback(sessionId);
+      };
+
+      container.appendChild(talkBtn);
+      container.appendChild(scheduleBtn);
+
+      chat.appendChild(container);
+      scrollToBottom();
+    }
+
+    function scrollToBottom() {
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function sendMessage() {
+      const msg = input.value.trim();
+      if (!msg || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+      addMessage(msg, 'user');
+      showTypingIndicator();
+
+      ws.send(JSON.stringify({
+        message: msg,
+        user_id: sessionId || 'web-' + Math.random().toString(36).substring(2, 8),
+        message_type: 'chat'
+      }));
+
+      input.value = '';
+      input.focus();
+    }
+
+    send.onclick = sendMessage;
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    window.addEventListener('load', () => {
+      input.focus();
+      connectWebSocket();
+    });
+
+    send.disabled = true;
+  </script>
+
+  <!-- Load escalation handlers -->
+  <script type="module">
+    import { handleTalkNow } from './static/js/talkNow.js';
+    import { handleScheduleCallback } from './static/js/scheduleCallback.js';
+
+    window.handleTalkNow = handleTalkNow;
+    window.handleScheduleCallback = handleScheduleCallback;
+  </script>
+</body>
+</html>
