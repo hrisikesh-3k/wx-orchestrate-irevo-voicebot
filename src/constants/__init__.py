@@ -3,7 +3,7 @@
 Configuration constants for the iRevo Voice Agent Integration
 """
 
-CHATBOT_NAME = "ClaimBuddy"
+CHATBOT_NAME = "Claim Buddy"
 
 # LLM Configuration
 import os
@@ -46,6 +46,6 @@ Let me connect you with a human support agent who can provide personalized assis
 """
 
 WELCOME_MESSAGE = """
-Hello! I'm your Health Insurance Assistant. I'm here to help you with your insurance related queries.
+Hello! I'm your Claim Buddy. I'm here to help you with your insurance related queries.
 How can I assist you today?
 """
