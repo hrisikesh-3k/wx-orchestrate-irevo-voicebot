@@ -1,7 +1,5 @@
 import os
 from typing import List, Any, Optional
-from pydantic import Field
-from src.react_agent.watsonx_config import PROJECT_ID
 
 from langchain_ibm.chat_models import ChatWatsonx
 from ibm_watsonx_ai.foundation_models.schema import TextChatParameters
@@ -12,11 +10,15 @@ parameters = TextChatParameters(
     top_p=1,
     )
 
+WX_API_KEY = os.getenv("WX_API_KEY")
+WX_PROJECT_ID = os.getenv("WX_PROJECT_ID")
+
+
 watsonx_llm = ChatWatsonx(
-    model_id="meta-llama/llama-3-3-70b-instruct",
-    url="https://us-south.ml.cloud.ibm.com",
-    apikey=os.getenv("WX_API_KEY"),
-    project_id=os.getenv("WX_PROJECT_ID"),
+    model_id="meta-llama/llama-3-2-90b-vision-instruct",
+    url="https://au-syd.ml.cloud.ibm.com",
+    apikey=WX_API_KEY,
+    project_id=WX_PROJECT_ID,
     params=parameters,
 )
 

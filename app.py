@@ -2,6 +2,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPExcept
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 import json
@@ -97,12 +99,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve static files
-static_dir = os.path.abspath("frontend/public")
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+# Serve static files - relative to app.py location
+static_dir = os.path.join(BASE_DIR, "static")
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 else:
     logger.warning(f"Static directory not found: {static_dir}")
+
+# Templates - relative to app.py location
+templates_dir = os.path.join(BASE_DIR, "templates")
+templates = Jinja2Templates(directory=templates_dir)
+
 
 def get_or_create_session_id(provided_session_id: Optional[str] = None) -> str:
     """Get existing session ID or create a new one."""

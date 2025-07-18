@@ -15,7 +15,7 @@ from langchain_openai.chat_models import ChatOpenAI
 from langchain_openai.embeddings import OpenAIEmbeddings
 from langchain_core.runnables.history import RunnableWithMessageHistory
 
-from src.rag import search_faq_database
+from src.constants.llm import watsonx_llm 
 from src.constants import *
 from src.react_agent.output_parser import EscalationOutputParser
 from src.react_agent.prompt import AGENT_PROMPT, HUB_PROMPT
@@ -32,7 +32,7 @@ session_escalation_states = {}
 
 class VoiceEscalationAgent:
     def __init__(self):
-        self.llm = 
+        self.llm = watsonx_llm
         self.tools = [search_faq_tool, escalate_to_voice]
         self.memory_manager = MemoryManager()
 
