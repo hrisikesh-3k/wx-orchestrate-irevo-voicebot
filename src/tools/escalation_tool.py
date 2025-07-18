@@ -1,6 +1,5 @@
-## tools
 import os, sys
-from typing import Optional
+from typing import Any, Dict, Optional
 from langchain_core.tools import tool
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -16,8 +15,6 @@ from langchain_core.tools.structured import StructuredTool
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
 
 @tool
 def escalate_to_voice(reason: str) -> Dict[str, Any]:

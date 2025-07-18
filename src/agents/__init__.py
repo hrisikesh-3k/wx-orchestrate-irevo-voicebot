@@ -1,85 +1,122 @@
-from src.tools import (#format_phone_number, sql_agent_tool,
-                       generate_lease_agreement_tool,
-                       agreement_and_payment_mailer_tool,
-                       calculate_offer_tool,
-                       format_phone_number_tool)
-from src.tools.otp_tools import send_otp_tool, verify_otp_tool
+# agent.py
+"""
+Optimized LangChain Tool-Calling Agent for Bank Support with Voice Escalation
+Smart agent that uses logical reasoning to determine when to use tools
+"""
 
-from src.tools.new_tools import (
-    get_lease_details_tool,
-    verify_tenant_apartment_tool,
-    check_rent_status_tool,
-    get_tenant_email_tool,
-    verify_phone_tool,
-    verify_tenant_tool,
-    
-)
-from src.prompts import SYSTEM_PROMPT
-from src.prompts.prompt_otp import SYSTEM_PROMPT_WITH_OTP
-from src.constants.llm import llm 
-
+import os
+import logging
+from typing import Dict, Generator, Optional, Any
+from langchain_core.prompts import PromptTemplate
 from langchain.agents import AgentExecutor, create_tool_calling_agent
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.memory import ConversationBufferMemory
+from langchain_core.tools import tool
+from langchain.memory import ConversationBufferWindowMemory
+from langchain_openai.chat_models import ChatOpenAI
+from langchain_openai.embeddings import OpenAIEmbeddings
+from langchain_core.runnables.history import RunnableWithMessageHistory
 
-from langchain_core.caches import InMemoryCache
-from langchain_core.globals import set_llm_cache
+from src.rag import search_faq_database
+from src.constants import *
+from src.react_agent.output_parser import EscalationOutputParser
+from src.react_agent.prompt import AGENT_PROMPT, HUB_PROMPT
+from src.react_agent.memory import MemoryManager
+from src.react_agent.tools import search_faq_tool, escalate_to_voice
 
-set_llm_cache(InMemoryCache())
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-memory = ConversationBufferMemory(memory_key="chat_history",
-                                  return_messages=True) #mongodb is planned as memory
+# Global session state tracking
+session_escalation_states = {}
 
 
-class RealEstateAgent:  
-    
+class VoiceEscalationAgent:
     def __init__(self):
+        self.llm = 
+        self.tools = [search_faq_tool, escalate_to_voice]
+        self.memory_manager = MemoryManager()
+
+        # Create the base agent with tools
+        self.agent = self.initialize_agent()
+
+        
+    def initialize_agent(self):
+        try:
+            # Initialize the agent with the prompt and tools
+            agent = create_tool_calling_agent(
+                llm=self.llm,
+                tools=self.tools,
+                prompt=HUB_PROMPT,
+            )
+            
+            agent_executor = AgentExecutor(agent=agent, tools=self.tools, verbose=True)
+            
+            agent_with_chat_history = RunnableWithMessageHistory(
+                agent_executor,
+                get_session_history=self.memory_manager.get,
+                input_messages_key="input",
+                history_messages_key="chat_history",
+            )
+
+            logger.info("VoiceEscalationAgent initialized successfully")
+            
+            return agent_with_chat_history
+
+        except Exception as e:
+            logger.error(f"Failed to initialize VoiceEscalationAgent: {e}")
+            raise 
+
+    def chat(self, query: str, session_id: str) -> dict:
+        try:
+            response = self.agent.invoke(
+                {"input": query},
+                config={"configurable": {"session_id": session_id}},
+            )
+            logger.debug(f"Raw agent response: {response}")
+
+            message_text = None
+            if isinstance(response, dict):
+                message_text = response.get("output") or response.get("message") or str(response)
+            else:
+                message_text = str(response)
+
+            # Detect if escalation message is present
+            should_escalate = (
+                "talk to them now" in message_text.lower() or
+                "schedule a callback" in message_text.lower() or
+                "connecting you to a human" in message_text.lower()
+            )
+
+            return {
+                "message": message_text,
+                "show_escalation_buttons": should_escalate,
+                "session_id": session_id
+            }
+
+        except Exception as e:
+            return {
+                "message": f"Something went wrong: {str(e)}",
+                "show_escalation_buttons": True,
+                "escalation_reason": "agent_error",
+                "session_id": session_id
+            }
+
+
+
+    def reset_conversation(self, session_id: str):
+        self.memory_manager.reset(session_id)
+
+    def cleanup_session(self, session_id: str):
+        self.memory_manager.cleanup(session_id)
+
+    def get_conversation_history(self, session_id: str):
+        return self.memory_manager.get(session_id).messages
+
+    def get_active_sessions(self):
+        return self.memory_manager.list_sessions()
+
+    def is_escalated(self, session_id: str) -> bool:
+        return False
+
+    def mark_session_transferred(self, session_id: str, target_agent: str):
         pass
-    
-    
-    def get_prompt(self):
-        prompt = ChatPromptTemplate.from_messages([
-        ("system", SYSTEM_PROMPT_WITH_OTP),
-        MessagesPlaceholder(variable_name="chat_history"),
-        ("human", "{input}"),
-        MessagesPlaceholder(variable_name="agent_scratchpad")
-    ])
-        
-        return prompt
-    
-    def build_agent(self)-> AgentExecutor:
-        
-        prompt = self.get_prompt()
-        
-        
-        
-        tools = [ #sql_agent_tool,
-                 generate_lease_agreement_tool,
-                 agreement_and_payment_mailer_tool,
-                 send_otp_tool,
-                 verify_otp_tool,
-                 format_phone_number_tool,
-                 calculate_offer_tool
-                 ]
-        new_tools = [get_lease_details_tool,
-                    verify_tenant_apartment_tool,
-                    check_rent_status_tool,
-                    get_tenant_email_tool,
-                    verify_phone_tool,
-                    verify_tenant_tool
-                    ]
-        tools.extend(new_tools)
-        
-        
-        agent = create_tool_calling_agent(llm, 
-                                          tools, 
-                                          prompt)
-        
-        agent_executor = AgentExecutor(
-            agent=agent, 
-            tools=tools,
-            verbose=True,
-            memory=memory  # You might want to add memory here
-        )
-        
-        return agent_executor
