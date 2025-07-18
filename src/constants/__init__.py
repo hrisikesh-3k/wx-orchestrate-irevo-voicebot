@@ -3,7 +3,7 @@
 Configuration constants for the iRevo Voice Agent Integration
 """
 
-INSURANCE_COMPANY_NAME = "the XYZ infurance"
+CHATBOT_NAME = "ClaimBuddy"
 
 # LLM Configuration
 import os
