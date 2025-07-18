@@ -46,6 +46,6 @@ Let me connect you with a human support agent who can provide personalized assis
 """
 
 WELCOME_MESSAGE = """
-Hello! I'm your Insurance Claim support assistant. I'm here to help you with your insurance claim related queries.
+Hello! I'm your Health Insurance Assistant. I'm here to help you with your insurance related queries.
 How can I assist you today?
 """
