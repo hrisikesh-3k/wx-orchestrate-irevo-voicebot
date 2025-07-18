@@ -1,0 +1,9 @@
+Tenant_ID,Current_Rent,Status
+1,1100,Paid
+2,1200,Pending
+3,1000,Paid
+4,1200,Paid
+5,1300,Pending
+6,1500,Pending
+7,1500,Pending
+8,1200,Pending
