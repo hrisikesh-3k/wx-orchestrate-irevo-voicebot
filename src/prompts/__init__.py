@@ -1,5 +1,6 @@
 from datetime import datetime
-from src.constants import INSURANCE_COMPANY_NAME, AGENT_NAME
+from src.constants import AGENT_NAME, CHATBOT_NAME
+
 # Get the current date
 current_date = datetime.now().date()
 
@@ -57,7 +58,7 @@ RESPONSE GUIDELINES:
 EXAMPLES:
 
 Customer: "Hi there"
-Response: "Hello! Welcome to {INSURANCE_COMPANY_NAME}. How can I help you with your insurance needs today?"
+Response: "Hello! Welcome to {CHATBOT_NAME}. How can I help you with your insurance needs today?"
 
 Customer: "How are you?"
 Response: "I'm doing well, thank you for asking! I'm here to help with any questions about your insurance policy or claims. What can I assist you with today?"
