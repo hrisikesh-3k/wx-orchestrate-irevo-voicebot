@@ -3,7 +3,6 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 import json
@@ -15,8 +14,14 @@ from contextlib import asynccontextmanager
 import os
 from dotenv import load_dotenv
 
+from src.summary_chain import run_summary_sync, summary_chain
 from src.constants import WELCOME_MESSAGE
-from src.agents import VoiceEscalationAgent
+from src.agents import VoiceEscalationAgent, MemoryManager
+from src.dbio.db import init_db
+from src.dbio.db import SessionLocal
+from src.dbio.models import UserVerification
+from src.dbio.session_history_manager import SessionHistoryManager
+from src.utils.session import get_user_session
 
 # Configure logging
 logging.basicConfig(
@@ -28,7 +33,10 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
+
 # Pydantic models for request/response validation
+
+
 class ChatRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=1000, description="User's message")
     session_id: Optional[str] = Field(None, description="Session identifier")
@@ -102,7 +110,6 @@ app.add_middleware(
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-
 # Serve static files - relative to app.py location
 static_dir = os.path.join(BASE_DIR, "static")
 if os.path.exists(static_dir):
@@ -138,6 +145,22 @@ async def root(request: Request):
     """Serve the main chat interface."""
     return templates.TemplateResponse("index.html", {"request": request})
 
+@app.post("/customer_chat_summary")
+async def summarize_session():
+    memory_manager = MemoryManager()
+
+    messages = memory_manager.get_current_message_history()
+    if not messages:
+        raise HTTPException(status_code=404, detail="No chat history found for this session")
+
+    response = run_summary_sync(messages)
+
+    return {
+        "name": response.get("name", ""),
+        "policy_number": response.get("policy_number", ""),
+        "summary": response.get("summary", "")
+    }
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
@@ -152,8 +175,16 @@ async def chat_endpoint(request: ChatRequest) -> ChatResponse:
     """REST endpoint for chat interactions."""
     try:
         # Get or create session ID
-        session_id = get_or_create_session_id(request.session_id)
-        
+        # session_id = get_or_create_session_id(request.session_id)
+
+        # # Generate session ID
+        session_manager = SessionHistoryManager()
+    
+        session_id = session_manager.session_id
+        # print(session.session_id)
+        logger.info("session id from ws endpoint: -- ", session_id)
+
+
         logger.info(f"Chat request for session {session_id}: {request.query[:50]}...")
         
         if not agent:
@@ -184,14 +215,22 @@ async def chat_endpoint(request: ChatRequest) -> ChatResponse:
 
 
 
-
 @app.websocket("/ws/chat")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time chat."""
     await websocket.accept()
     
     # Generate session ID
-    session_id = str(uuid.uuid4())
+    session_manager = SessionHistoryManager()
+    
+    session_id = session_manager.session_id
+
+    # session = get_user_session()
+    # session_id = session.session_id
+    # print(session.session_id)
+    logger.info("session id from ws endpoint: -- ", session_id)
+
+
     logger.info(f"WebSocket connection established: {session_id}")
     
     try:
@@ -219,6 +258,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 
                 user_input = ws_message.message
                 # Use provided session_id or the WebSocket session_id
+
                 current_session_id = ws_message.session_id or session_id
                 
                 logger.info(f"WebSocket message for session {current_session_id}: {user_input[:50]}...")
@@ -276,28 +316,7 @@ async def websocket_endpoint(websocket: WebSocket):
             except Exception as e:
                 logger.error(f"Error cleaning up session {session_id}: {e}")
 
-@app.get("/sessions/{session_id}/history")
-async def get_session_history(session_id: str):
-    """Get conversation history for a session."""
-    try:
-        if not agent:
-            raise HTTPException(status_code=503, detail="Service temporarily unavailable")
-        
-        history = agent.get_conversation_history(session_id)
-        return {
-            "session_id": session_id,
-            "history": [
-                {
-                    "role": "human" if msg.type == "human" else "bot",
-                    "content": msg.content,
-                    "timestamp": getattr(msg, 'timestamp', None)
-                }
-                for msg in history
-            ]
-        }
-    except Exception as e:
-        logger.error(f"Error getting session history: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve history")
+
 
 @app.get("/sessions/{session_id}/status")
 async def get_session_status(session_id: str):
@@ -407,6 +426,7 @@ if __name__ == "__main__":
         "app:app",
         host="0.0.0.0",
         port=8000,
-        reload=os.getenv("DEBUG", "false").lower() == "true",
-        log_level="info"
+        reload=True,
+        log_level="info",
+
     )
