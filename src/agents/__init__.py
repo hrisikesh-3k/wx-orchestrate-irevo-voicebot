@@ -1,6 +1,6 @@
 """
 Enhanced VoiceEscalationAgent with Response Formatting
-Fixes formatting issues while maintaining existing functionality
+Fixed escalation button logic and added better debugging
 """
 
 import os
@@ -11,51 +11,80 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.runnables import RunnableWithMessageHistory
 
-
 from src.constants.llm import watsonx_llm
-
 from langchain_core.runnables.history import RunnableWithMessageHistory
 
 from src.constants import *
 from src.prompts import SYSTEM_PROMPT
 from src.agents.memory import MemoryManager
 from src.tools import escalate_to_voice_tool, search_faq_tool, default_chat_tool
+from src.logger import logger
 
 from dotenv import load_dotenv
 load_dotenv()
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # Global session state tracking
 session_escalation_states = {}
 
 
 class ResponseFormatter:
-    """Dedicated class for formatting agent responses for better UI display"""
+    """Dedicated class for formatting agent responses with precise escalation logic"""
     
     def __init__(self):
-        self.security_keywords = [
-            "locked", "lockout", "authentication", "fraud", "blocked", 
-            "security", "access denied", "failed attempts", "temporarily locked"
+        # Keywords that explicitly indicate escalation is needed
+        self.explicit_escalation_phrases = [
+            "connect you with",
+            "let me connect",
+            "talk to a human",
+            "speak with an agent",
+            "transfer you to",
+            "escalate to",
+            "human agent can help",
+            "specialist can help",
+            "representative can assist",
+            "schedule a callback",
+            "call you back"
         ]
-        self.escalation_keywords = [
-            "human agent", "representative", "escalate", "connect you",
-            "talk to someone", "specialist", "support team"
+        
+        # Keywords that indicate user wants human help
+        self.user_escalation_requests = [
+            "talk to someone",
+            "speak to a person", 
+            "human agent",
+            "representative",
+            "real person",
+            "customer service agent",
+            "claim specialist",
+            "talk to a manager"
+        ]
+        
+        # Security issues that require human intervention
+        self.security_escalation_triggers = [
+            "account locked",
+            "authentication failed",
+            "fraud detected",
+            "security breach",
+            "access denied",
+            "locked out"
         ]
     
     def format_response(self, raw_response: str, query: str) -> Dict:
-        """Main formatting method that cleans and enhances responses"""
+        """Main formatting method with corrected escalation logic"""
         
-        # Step 1: Clean the response text
+        if not raw_response:
+            return {
+                "message": "I apologize, but I'm having trouble processing your request. Let me connect you with a human agent.",
+                "show_escalation_buttons": True
+            }
+        
+        # Clean the response text (minimal cleaning)
         cleaned = self.clean_text(raw_response)
         
-        # Step 2: Handle specific scenarios
+        # Handle specific scenarios
         formatted = self.handle_specific_scenarios(cleaned, query)
         
-        # Step 3: Determine if escalation is needed
-        should_escalate = self.needs_escalation(formatted, query)
+        # Determine if escalation is needed with corrected logic
+        should_escalate = self.should_escalate(formatted, query)
         
         return {
             "message": formatted,
@@ -63,102 +92,104 @@ class ResponseFormatter:
         }
     
     def clean_text(self, text: str) -> str:
-        """Remove problematic formatting and duplicates"""
+        """Minimal cleaning to preserve content"""
         
-        # Remove duplicate sentences (common issue in your output)
-        text = self.remove_duplicates(text)
+        if not text:
+            return ""
         
-        # Remove markdown tables
-        text = re.sub(r'\|[^|]*\|[^|]*\|[^|]*\|', '', text, flags=re.MULTILINE)
-        text = re.sub(r'\|---\|---\|---\|', '', text)
-        
-        # Remove bullet points with formatting
-        text = re.sub(r'- \*\*([^*]+)\*\*:', r'\1:', text)
-        
-        # Remove bold formatting
+        # Remove markdown formatting
         text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
-        
-        # Remove "Here's a simple table to summarize:" type phrases
-        text = re.sub(r'Here\'s a simple table to summarize:.*?(?=\n|$)', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\|[^|]*\|', '', text)
         
         # Clean up whitespace
-        text = re.sub(r'\n+', '\n', text)
+        text = re.sub(r'\n+', ' ', text)
         text = re.sub(r'\s+', ' ', text)
-        
-        # Remove leading/trailing whitespace
         text = text.strip()
         
         return text
     
-    def remove_duplicates(self, text: str) -> str:
-        """Remove duplicate content that appears in agent responses"""
-        
-        # Split by sentences
-        sentences = re.split(r'[.!?]+', text)
-        seen = set()
-        unique_sentences = []
-        
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if sentence and len(sentence) > 10:  # Ignore very short fragments
-                # Create a normalized version for comparison
-                normalized = re.sub(r'[^a-zA-Z0-9\s]', '', sentence.lower())
-                if normalized not in seen:
-                    seen.add(normalized)
-                    unique_sentences.append(sentence)
-        
-        return '. '.join(unique_sentences) + '.' if unique_sentences else text
-    
     def handle_specific_scenarios(self, text: str, query: str) -> str:
-        """Handle specific banking scenarios with better responses"""
+        """Handle specific scenarios - keep original response for claim info"""
         
-        # Authentication/lockout scenarios
-        if any(keyword in query.lower() for keyword in self.security_keywords):
-            return self.format_authentication_response(text)
+        # For claim-related queries, keep the response as-is
+        claim_keywords = ["claim", "policy", "coverage", "benefit", "member id"]
+        if any(keyword in query.lower() for keyword in claim_keywords):
+            return text
         
-        # General banking questions
-        if any(word in query.lower() for word in ["account", "balance", "transaction", "fee"]):
-            return self.format_banking_response(text)
-        
-        # Return cleaned text for other scenarios
+        # Only modify for non-claim responses
         return text
     
-    def format_authentication_response(self, text: str) -> str:
-        """Format authentication/lockout related responses"""
+    def should_escalate(self, response: str, query: str) -> bool:
+        """Precise escalation logic - only escalate when actually needed"""
         
-        return """I understand you're having trouble with authentication. After 3 failed login attempts, your account gets temporarily locked for security reasons.
-
-I can help you get this resolved quickly by connecting you with one of our security specialists who can unlock your account and verify your identity. Would you like me to arrange that for you?"""
-    
-    def format_banking_response(self, text: str) -> str:
-        """Format general banking responses to be more conversational"""
-        
-        # Keep the original response but make it more conversational
-        if "Based on the provided document" in text:
-            text = re.sub(r'Based on the provided document,?\s*', '', text, flags=re.IGNORECASE)
-        
-        # Remove formal language patterns
-        text = re.sub(r'here\'s the relevant information regarding', 'regarding', text, flags=re.IGNORECASE)
-        
-        return text
-    
-    def needs_escalation(self, response: str, query: str) -> bool:
-        """Determine if escalation buttons should be shown"""
-        
-        # Security-related issues should trigger escalation
-        if any(keyword in query.lower() or keyword in response.lower() 
-               for keyword in self.security_keywords):
+        if not response:
             return True
         
-        # If response mentions connecting to human
-        if any(keyword in response.lower() for keyword in self.escalation_keywords):
+        response_lower = response.lower()
+        query_lower = query.lower()
+        
+        # 1. EXPLICIT ESCALATION: Response explicitly mentions connecting to human
+        for phrase in self.explicit_escalation_phrases:
+            if phrase in response_lower:
+                return True
+        
+        # 2. USER REQUESTS: User explicitly asks for human help
+        for phrase in self.user_escalation_requests:
+            if phrase in query_lower:
+                return True
+        
+        # 3. SECURITY ISSUES: Security problems that need human intervention  
+        for phrase in self.security_escalation_triggers:
+            if phrase in response_lower or phrase in query_lower:
+                return True
+        
+        # 4. SYSTEM ERRORS: Response indicates system issues
+        error_indicators = [
+            "technical difficulty",
+            "system error", 
+            "unable to access",
+            "having trouble",
+            "connection error"
+        ]
+        for indicator in error_indicators:
+            if indicator in response_lower:
+                return True
+        
+        # 5. INCOMPLETE RESPONSES: Only if response is genuinely too short
+        if len(response.strip()) < 10:
             return True
         
-        # If customer explicitly asks for human help
-        human_requests = ["human", "person", "agent", "representative", "talk to someone"]
-        if any(word in query.lower() for word in human_requests):
-            return True
+        # 6. CLAIM-SPECIFIC: For claim responses, only escalate if there's a problem
+        if "claim" in response_lower:
+            # These indicate successful claim information - NO escalation
+            success_indicators = [
+                "processed",
+                "approved", 
+                "paid",
+                "completed",
+                "explanation of benefits",
+                "claim has been",
+                "insurance has paid"
+            ]
+            
+            # If response contains claim info AND success indicators, don't escalate
+            if any(indicator in response_lower for indicator in success_indicators):
+                return False
+            
+            # Only escalate for claim issues like denied, pending investigation, etc.
+            problem_indicators = [
+                "denied",
+                "rejected", 
+                "under investigation",
+                "additional information needed",
+                "contact us",
+                "call us"
+            ]
+            
+            if any(indicator in response_lower for indicator in problem_indicators):
+                return True
         
+        # 7. DEFAULT: If none of the escalation conditions are met, don't escalate
         return False
 
 
@@ -168,29 +199,27 @@ class VoiceEscalationAgent:
         self.tools = [search_faq_tool, escalate_to_voice_tool, default_chat_tool]
         self.memory_manager = MemoryManager()
         
-        # Initialize response formatter
+        # Initialize response formatter with corrected logic
         self.formatter = ResponseFormatter()
         
-        # Create custom prompt instead of using HUB_PROMPT
+        # Create custom prompt
         self.prompt = self.create_custom_prompt()
         
         # Create the base agent with tools
         self.agent = self.initialize_agent()
 
     def create_custom_prompt(self):
-        """Create a custom prompt template for better control"""
+        """Create a custom prompt template"""
         
-        # Enhanced prompt with formatting guidelines
         ENHANCED_AGENT_PROMPT = f"""{SYSTEM_PROMPT}
 
 RESPONSE FORMAT GUIDELINES:
-- Keep responses concise and conversational
-- Avoid creating tables, excessive bullet points, or complex formatting
-- Don't repeat information multiple times
-- Use simple, clear language that works well in chat interfaces
-- For account security issues, be empathetic and offer to connect with specialists
+- Provide complete, helpful responses for insurance queries
+- For claim status requests, give all available information clearly
+- Only suggest escalation when you cannot help or when explicitly requested
+- Keep responses conversational and professional
 
-Remember: Your responses will be displayed in a chat interface, so keep them clean and user-friendly."""
+Remember: Only escalate to human agents when truly necessary."""
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", ENHANCED_AGENT_PROMPT),
@@ -202,20 +231,20 @@ Remember: Your responses will be displayed in a chat interface, so keep them cle
 
     def initialize_agent(self):
         try:
-            # Initialize the agent with the custom prompt and tools
             agent = create_tool_calling_agent(
                 llm=self.llm,
                 tools=self.tools,
-                prompt=self.prompt,  # Use custom prompt instead of HUB_PROMPT
+                prompt=self.prompt,
             )
             
             agent_executor = AgentExecutor(
                 agent=agent, 
                 tools=self.tools, 
                 verbose=True,
-                handle_parsing_errors=True,  # Add error handling
-                # max_iterations=3,  # Prevent infinite loops
-                # early_stopping_method="generate"  # Stop early if needed
+                handle_parsing_errors=True,
+                max_iterations=5,
+                max_execution_time=60,
+                return_intermediate_steps=False,
             )
             
             agent_with_chat_history = RunnableWithMessageHistory(
@@ -234,27 +263,19 @@ Remember: Your responses will be displayed in a chat interface, so keep them cle
 
     def chat(self, query: str, session_id: str) -> dict:
         try:
-            # Add some preprocessing to help guide the agent
             processed_query = self.preprocess_query(query)
-            
-            #orchestrate agent invocation 
-            
             
             response = self.agent.invoke(
                 {"input": processed_query},
                 config={"configurable": {"session_id": session_id}},
             )
             
-            logger.debug(f"Raw agent response: {response}")
+            logger.info(f"Raw agent response: {response}")
 
             # Extract message text
-            message_text = None
-            if isinstance(response, dict):
-                message_text = response.get("output") or response.get("message") or str(response)
-            else:
-                message_text = str(response)
+            message_text = self.extract_message_text(response)
 
-            # NEW: Format the response for better UI display
+            # Format the response
             formatted_response = self.formatter.format_response(message_text, query)
 
             return {
@@ -271,37 +292,31 @@ Remember: Your responses will be displayed in a chat interface, so keep them cle
                 "escalation_reason": "agent_error",
                 "session_id": session_id
             }
+    
+    def extract_message_text(self, response) -> str:
+        """Extract message text from agent response"""
+        
+        if not response:
+            return ""
+        
+        if isinstance(response, dict):
+            return (response.get("output") or 
+                   response.get("message") or 
+                   response.get("content") or
+                   str(response))
+        else:
+            return str(response)
 
     def preprocess_query(self, query: str) -> str:
-        """Add context hints to help guide tool usage"""
+        """Preprocess query"""
         query = query.strip()
         
-        # Simple greetings - add hint to respond directly
-        simple_greetings = ["hi", "hello", "hey", "good morning", "good afternoon", "how are you"]
-        if query.lower() in simple_greetings:
-            return f"{query}"  # Keep as is, let prompt handle it
-        
-        # Explicit human requests - add urgency
+        # Explicit human requests
         human_requests = ["human", "person", "agent", "representative", "talk to someone"]
         if any(word in query.lower() for word in human_requests):
             return f"{query} [ESCALATION_NEEDED]"
         
         return query
-
-    def detect_escalation_intent(self, message_text: str) -> bool:
-        """Detect if the response indicates escalation is needed"""
-        escalation_indicators = [
-            "talk to them now",
-            "schedule a callback", 
-            "connecting you to a human",
-            "escalate",
-            "human agent",
-            "representative",
-            "transfer you",
-            "connect you with"
-        ]
-        
-        return any(indicator in message_text.lower() for indicator in escalation_indicators)
 
     def reset_conversation(self, session_id: str):
         self.memory_manager.reset(session_id)
