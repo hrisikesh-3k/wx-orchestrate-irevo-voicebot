@@ -22,13 +22,7 @@ from src.dbio.db import SessionLocal
 from src.dbio.models import UserVerification
 from src.dbio.session_history_manager import SessionHistoryManager
 from src.utils.session import get_user_session
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+from src.logger import logger
 
 # Load environment variables
 load_dotenv()
@@ -182,10 +176,10 @@ async def chat_endpoint(request: ChatRequest) -> ChatResponse:
     
         session_id = session_manager.session_id
         # print(session.session_id)
-        logger.info("session id from ws endpoint: -- ", session_id)
+        # logger.info(f"session id from ws endpoint: -- {session_id}")
 
 
-        logger.info(f"Chat request for session {session_id}: {request.query[:50]}...")
+        # logger.info(f"Chat request for session {session_id}: {request.query[:50]}...")
         
         if not agent:
             logger.error("Agent not initialized")
@@ -228,10 +222,10 @@ async def websocket_endpoint(websocket: WebSocket):
     # session = get_user_session()
     # session_id = session.session_id
     # print(session.session_id)
-    logger.info("session id from ws endpoint: -- ", session_id)
+    # logger.info(f"session id from ws endpoint: -- , {session_id}")
 
 
-    logger.info(f"WebSocket connection established: {session_id}")
+    # logger.info(f"WebSocket connection established: {session_id}")
     
     try:
         # Send welcome message
@@ -261,7 +255,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 current_session_id = ws_message.session_id or session_id
                 
-                logger.info(f"WebSocket message for session {current_session_id}: {user_input[:50]}...")
+                # logger.info(f"WebSocket message for session {current_session_id}: {user_input[:50]}...")
                 
                 # Check agent availability
                 if not agent:
@@ -274,6 +268,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Process message with session ID
                 response = await run_agent_chat(user_input, current_session_id)
                 
+                # print("Agent response:", response)
+                logger.info(f"Agent response for session {current_session_id}: {response}")
                 # Send response
                 await websocket.send_json({
                     "message": response.get("message", "I'm here to help!"),
@@ -425,8 +421,8 @@ if __name__ == "__main__":
     uvicorn.run(
         "app:app",
         host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info",
+        port=8080,
+        # reload=True,
+        # log_level="info",
 
     )
