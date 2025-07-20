@@ -5,7 +5,7 @@ from langchain_ibm.chat_models import ChatWatsonx
 from ibm_watsonx_ai.foundation_models.schema import TextChatParameters
 
 parameters = TextChatParameters(
-    max_tokens=100,
+    max_tokens=1000,
     temperature=0.5,
     top_p=1,
     )

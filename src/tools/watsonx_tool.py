@@ -11,6 +11,9 @@ from src.constants import *
 import re
 from pydantic import BaseModel, Field
 from langchain_core.tools.structured import StructuredTool
+
+from src.agents.wxorc_agent import OrchestrateClient
+
 from src.logger import logger
 
 
@@ -81,21 +84,18 @@ def search_faq_tool(query: str) -> Dict[str, Any]:
                 "escalation_reason": "no_faq_results"
             }
         
-        # Handle empty or very short results
-        if len(search_result.strip()) < 10:
-            logger.warning("Watson X returned insufficient result content")
-            return {
-                "message": "I found limited information on that topic. Let me connect you with our claim specialist who can provide more detailed assistance.",
-                "show_escalation_buttons": True,
-                "escalation_reason": "insufficient_content"
-            }
+        
         
         # Return successful FAQ result
-        return {
+        
+        response = {
             "message": search_result,
             "show_escalation_buttons": False
         }
-        
+        logger.info(f"FAQ search result from tool: {response['message']}")
+
+        return response
+
     except TimeoutError as e:
         logger.error(f"Watson X Orchestrate timeout: {e}")
         return {
@@ -136,16 +136,14 @@ def invoke_watsonx_rag_agent(query: str) -> str:
         ConnectionError: If connection to Watson X fails
         Exception: For other API-related errors
     """
-    # TODO: Implement Watson X Orchestrate API integration
-    # This will replace the current Chroma + OpenAI embeddings approach
     
-    # Placeholder for Watson X Orchestrate API call
-    # Example implementation structure:
-    # response = watsonx_client.invoke_rag_agent(
-    #     query=query,
-    #     agent_id="insurance-faq-rag-agent",
-    #     timeout=30
-    # )
-    # return response.get("answer", "")
+    client = OrchestrateClient()
+    wx_response = client.ask(query)
     
-    pass
+    logger.info(f"Watson X Orchestrate response: {wx_response}")
+
+    return wx_response
+
+
+
+    
