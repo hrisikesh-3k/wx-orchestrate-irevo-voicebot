@@ -151,13 +151,14 @@ async def summarize_session():
     response = run_summary_sync(messages)
 
     now_dt = datetime.now()
+    
 
     # Get time 5 minutes ago (still datetime object)
     five_minutes_ago_dt = now_dt - timedelta(minutes=5)
 
     # Now format both to strings
-    now = now_dt.strftime("%H:%M:%S")
-    five_minutes_ago = five_minutes_ago_dt.strftime("%H:%M:%S")
+    five_minutes_ago = five_minutes_ago_dt.strftime("%I:%M:%S %p")
+
 
     # Get time 5 minutes ago
     return {
