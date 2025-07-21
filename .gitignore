@@ -169,3 +169,5 @@ env
 *.pdf
 .vscode
 tests
+
+*.db 
