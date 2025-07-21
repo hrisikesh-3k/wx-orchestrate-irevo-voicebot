@@ -18,7 +18,8 @@
     }
 
     .summary-wrapper {
-      max-width: 700px;
+      width: 700px;
+      min-height: 300px;
       margin: 50px auto;
       padding: 30px;
       background-color: #fff;
@@ -82,7 +83,8 @@
       <img src="/static/icons/user.png" alt="user-icon" width="24">
     </div>
   </div>
-
+ <div class="chat-container">
+    <div class="chat-header">ASK Health Insurance</div>
   <!-- Summary Card -->
   <div class="summary-wrapper">
     <div class="summary-header">Chat Summary</div>
@@ -115,37 +117,48 @@
     </div>
 
     <!-- Error Box -->
-    <div id="summary-error" class="error-box" style="display: none;"></div>
+    <div id="summary-error" class="error-box text-center" style="display: none;"></div>
   </div>
+</div>
+<script>
+  const loader = document.getElementById('summary-loader');
+  const content = document.getElementById('summary-content');
+  const errorBox = document.getElementById('summary-error');
 
-  <script>
-    const loader = document.getElementById('summary-loader');
-    const content = document.getElementById('summary-content');
-    const errorBox = document.getElementById('summary-error');
+  fetch('/customer_chat_summary', { method: 'POST' })
+    .then(response => response.json())
+    .then(data => {
+      loader.style.display = 'none';
 
-    fetch('/customer_chat_summary', { method: 'POST' })
-      .then(response => response.json())
-      .then(data => {
-        loader.style.display = 'none';
-
-        if (data.error && data.status_code === 404) {
-          errorBox.textContent = data.error;
-          errorBox.style.display = 'block';
-          return;
-        }
-
-        document.getElementById('summary-name').textContent = data.name || '—';
-        document.getElementById('summary-policy').textContent = data.policy_number || '—';
-         document.getElementById('summary-date').textContent = data.date && data.time || '—';
-        document.getElementById('summary-text').textContent = data.summary || '—';
-
-        content.style.display = 'block';
-      })
-      .catch(err => {
-        loader.style.display = 'none';
-        errorBox.textContent = '⚠ Failed to load summary. Please try again later.';
+      if (data.error && data.status_code === 404) {
+        errorBox.textContent = data.error;
         errorBox.style.display = 'block';
-      });
-  </script>
+        return;
+      }
+
+      document.getElementById('summary-name').textContent = data.name || '—';
+      document.getElementById('summary-policy').textContent = data.policy_number || '—';
+
+      // Format as: 2025-07-21 | 11:59:47
+      let formattedDateTime = '—';
+      if (data.date && data.time) {
+        formattedDateTime = `${data.date.split('T')[0]} | ${data.time}`;
+      } else if (data.date) {
+        formattedDateTime = data.date;
+      }
+
+      document.getElementById('summary-date').textContent = formattedDateTime;
+      document.getElementById('summary-text').textContent = data.summary || '—';
+
+      content.style.display = 'block';
+    })
+    .catch(err => {
+      loader.style.display = 'none';
+      errorBox.textContent = '⚠ Failed to load summary. Please try again later.';
+      errorBox.style.display = 'block';
+    });
+</script>
+
+
 </body>
 </html>

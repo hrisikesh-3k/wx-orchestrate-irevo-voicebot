@@ -327,21 +327,14 @@ avatar.appendChild(img);
       if (!msg || !ws || ws.readyState !== WebSocket.OPEN) return;
 
 
-      // Get current date and time in ISO format
-      const now = new Date();
-      const date = now.toLocaleDateString();
-      const time = now.toLocaleTimeString();
-
       // Add message with date and time
-      addMessage(`${msg}\n[${date} ${time}]`, 'user');
+      addMessage(`${msg}`, 'user');
       showTypingIndicator();
 
       ws.send(JSON.stringify({
         message: msg,
         user_id: sessionId || 'web-' + Math.random().toString(36).substring(2, 8),
-        message_type: 'chat',
-        date: date,
-        time: time
+        message_type: 'chat'
       }));
 
       input.value = '';
