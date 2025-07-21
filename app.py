@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -149,10 +150,22 @@ async def summarize_session():
 
     response = run_summary_sync(messages)
 
+    now_dt = datetime.now()
+
+    # Get time 5 minutes ago (still datetime object)
+    five_minutes_ago_dt = now_dt - timedelta(minutes=5)
+
+    # Now format both to strings
+    now = now_dt.strftime("%H:%M:%S")
+    five_minutes_ago = five_minutes_ago_dt.strftime("%H:%M:%S")
+
+    # Get time 5 minutes ago
     return {
         "name": response.get("name", ""),
         "policy_number": response.get("policy_number", ""),
-        "summary": response.get("summary", "")
+        "summary": response.get("summary", ""),
+        "date": datetime.now().isoformat(),
+        "time": five_minutes_ago,
     }
 
 @app.get("/health")
