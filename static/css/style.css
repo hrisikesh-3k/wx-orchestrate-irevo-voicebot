@@ -304,3 +304,9 @@
       .escalation-btn { min-width: 100%; }
       
     }
+
+
+        .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); padding: 32px; }
+    h2 { margin-bottom: 24px; }
+    p { font-size: 1.1rem; margin-bottom: 12px; }
+    button { margin-top: 24px; }
