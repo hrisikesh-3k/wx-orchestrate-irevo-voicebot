@@ -381,6 +381,10 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         content={"error": exc.detail, "status_code": exc.status_code}
     )
 
+@app.get("/chat-summary")
+async def summary_page(request: Request):
+    return templates.TemplateResponse("summary.html", {"request": request})
+
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """Handle general exceptions."""
